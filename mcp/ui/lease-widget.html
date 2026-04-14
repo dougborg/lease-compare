@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0e0e0e;
+    color: #ddd;
+    font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+    font-size: 12px;
+    padding: 16px;
+  }
+  .title { font-size: 14px; font-weight: 700; color: #c4a647; margin-bottom: 12px; }
+  .cards { display: grid; gap: 12px; margin-bottom: 16px; }
+  .card {
+    background: #141414;
+    border-radius: 6px;
+    padding: 14px;
+    border: 1px solid #2a2a2a;
+  }
+  .card.best { border: 2px solid var(--accent); }
+  .card-name { font-weight: 700; margin-bottom: 10px; }
+  .best-badge { font-size: 9px; letter-spacing: 0.1em; margin-bottom: 6px; }
+  .stat { margin-bottom: 8px; }
+  .stat-label { font-size: 10px; color: #666; letter-spacing: 0.05em; }
+  .stat-value { font-size: 18px; font-weight: 700; }
+  .stat-sub { font-size: 10px; color: #555; }
+  .overage { font-size: 10px; color: #c45a47; margin-top: 6px; }
+  .shield { font-size: 10px; color: #5a9a5a; margin-top: 4px; }
+  .rec {
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: #c4a647;
+  }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  th { text-align: right; padding: 5px 8px; color: #666; border-bottom: 1px solid #333; font-size: 10px; }
+  th:first-child { text-align: left; }
+  td { padding: 4px 8px; text-align: right; color: #999; font-size: 11px; }
+  td:first-child { text-align: left; color: #666; }
+  tr.bold td { color: #ddd; font-weight: 700; }
+  tr.sep td { border: none; height: 6px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const COLORS = ["#c4a647", "#47a6c4", "#c45a47", "#5ac447"];
+
+function fmt(n) {
+  if (n == null || isNaN(n)) return "$0";
+  const abs = Math.abs(n);
+  const s = abs.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  return n < 0 ? `-$${s}` : `$${s}`;
+}
+
+function pctFmt(n) {
+  return (n * 100).toFixed(2) + "%";
+}
+
+function render(data) {
+  if (!data || !data.scenarios) return;
+  const app = document.getElementById("app");
+  const count = data.scenarios.length;
+
+  const cardsStyle = `grid-template-columns: repeat(${Math.min(count, 4)}, 1fr)`;
+  const bestName = data.comparison.bestEffectiveMonthly.name;
+
+  let html = `<div class="title">Lease Comparison</div>`;
+  html += `<div class="cards" style="${cardsStyle}">`;
+
+  data.scenarios.forEach((s, i) => {
+    const color = COLORS[i % COLORS.length];
+    const isBest = s.name === bestName && count > 1;
+    const eff = s.results.effectiveMonthly;
+    const apr = s.results.impliedApr;
+    const res = s.results.residual;
+    const overage = s.results.overageTotal;
+    const shield = s.results.depShield;
+
+    html += `<div class="card${isBest ? " best" : ""}" style="${isBest ? `--accent:${color};border-color:${color}` : ""}">`;
+    if (isBest) html += `<div class="best-badge" style="color:${color}">BEST VALUE</div>`;
+    html += `<div class="card-name" style="color:${color}">${esc(s.name)}</div>`;
+
+    html += stat("EFFECTIVE COST/MO", fmt(eff.raw), color, "includes trade, down, overages");
+    html += stat("MONTHLY PAYMENT", fmt(s.inputs.monthlyPayment), null,
+      `${s.inputs.term}mo / ${(s.inputs.milesAllowed/1000).toFixed(0)}k mi/yr`);
+    html += stat("TRUE TOTAL COST", fmt(s.results.trueCost.raw), null, "cash + trade equity + overages");
+    html += stat("IMPLIED APR", pctFmt(apr.raw / 100), apr.raw > 10 ? "#c45a47" : null,
+      `MF: ${s.results.mf.formatted}`);
+    html += stat("RESIDUAL", fmt(res.raw), null, `${s.inputs.residualPct}% of MSRP`);
+
+    if (overage.raw > 0) {
+      html += `<div class="overage">Mileage overage: ${fmt(overage.raw)} (${s.results.totalExcess.raw.toLocaleString()} excess mi)</div>`;
+    }
+    if (shield.raw > 0) {
+      html += `<div class="shield">Manufacturer absorbs ~${fmt(shield.raw)} in depreciation</div>`;
+    }
+    html += `</div>`;
+  });
+
+  html += `</div>`;
+  html += `<div class="rec">${esc(data.recommendation)}</div>`;
+
+  // Ranking table
+  html += `<table><thead><tr><th style="text-align:left">Rank</th><th>Scenario</th><th>Effective $/mo</th><th>Delta</th></tr></thead><tbody>`;
+  data.comparison.ranking.forEach((r, i) => {
+    html += `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${r.formatted}</td><td>${r.deltaFormatted}</td></tr>`;
+  });
+  html += `</tbody></table>`;
+
+  app.innerHTML = html;
+}
+
+function stat(label, value, color, sub) {
+  return `<div class="stat">
+    <div class="stat-label">${label}</div>
+    <div class="stat-value"${color ? ` style="color:${color}"` : ""}>${value}</div>
+    ${sub ? `<div class="stat-sub">${sub}</div>` : ""}
+  </div>`;
+}
+
+function esc(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// Data can be injected via window.__LEASE_DATA__ (server-side) or postMessage (client-side)
+if (window.__LEASE_DATA__) {
+  render(window.__LEASE_DATA__);
+}
+
+window.addEventListener("message", (e) => {
+  if (e.data && e.data.type === "lease-data") {
+    render(e.data.payload);
+  }
+});
+</script>
+</body>
+</html>
